@@ -1,0 +1,200 @@
+#Note: this is code that I wrote to analyse THD stores by pro sales variables. I was attempting to cluster these stores to see if any common patterns would emerge.
+
+rm(list=ls())
+
+#installations
+install.packages("Hmisc")
+install.packages("cluster")
+install.packages("fpc")
+
+#libraries
+library(Hmisc)
+library(cluster)
+library(fpc)
+
+#set/retrieve working directory
+setwd("C:/Users/jxw4692/Documents/R/VPP")
+
+#load workspace
+load("Clustering.RData")
+
+#read clustering.csv
+clustering <- read.csv("Clustering.csv",header = T,stringsAsFactors = F,na.strings = c("","na","N/A","NA","n/a"),sep = ",")
+colnames(clustering) <- c("ID","YTD_Pen","vLY_Pen","Close_Rate","Pro_Pen","vLY_Sales","RC30_pct","vLY_RC30")
+clust_log <- log(clustering[2:8]) #not sure if I should use log because all my negatives go away
+clust_std <- scale(clustering[2:8])
+cor(clust_std,method = "pearson")
+
+#looking at correlations
+cor(clustering[2:8], method = "pearson")
+#vLY_Rc30 and RC30_pct have a 55% corr
+#vLY_sales and vLY_pen have a 30% corr--remove vLY_pen?
+#RC30_pct and Close_rate have a 31% corr
+plot(log(clustering$vLY_RC30),log(clustering$RC30_pct))
+abline(lm(log(clustering$RC30_pct)~log(clustering$vLY_RC30)))
+RC30_reg <- lm(clustering$RC30_pct~clustering$vLY_RC30)
+plot(RC30_reg$residuals)
+
+plot(clustering$vLY_Sales,clustering$vLY_Pen)
+abline(lm(clustering$vLY_Sales~clustering$vLY_Pen))
+vLY_sales <- lm(clustering$vLY_Sales~clustering$vLY_Pen)
+plot(vLY_sales$residuals)
+
+#looking at normality in the variables
+hist(clustering$YTD_Pen) #right-skewed
+hist(clustering$vLY_Pen) #normal-looking
+hist(clustering$Close_Rate) #skewed-left
+hist(clustering$Pro_Pen) #mean != 0
+#they're not normal, so it's a good thing I scaled them
+
+#try PCA analysis without logged variables
+PCA_all <- prcomp(clust_std,center = T,scale. = T)
+print(PCA_all)
+plot(PCA_all)
+
+PCA_all_2 <- prcomp(clustering[2:8],center = T,scale. = T)
+plot(PCA_all_2)
+print(PCA_all_2)
+summary(PCA_all_2)
+
+#####Clustering with unscaled data and with current number of features
+# Determine number of clusters
+wss <- (nrow(clustering[2:8])-1)*sum(apply(clustering[2:8],2,var))
+  #this is the wss of the current set of observations by the 7 features
+for (i in 2:15) wss[i] <- sum(kmeans(clustering[2:8], 
+                                               centers=i)$withinss)
+
+  #this is the wss of data points by # of clusters defined from 2-15
+plot(1:15, wss, type="b", xlab="Number of Clusters",
+     ylab="Within groups sum of squares")
+#bend in the plot looks like it's at 2 clusters. Or maybe 10, because the number goes down to 50?
+
+#k-means clustering
+fit <- kmeans(clustering[2:8], 2) # 2 cluster solution
+# get cluster means 
+aggregate(clustering[2:8],by=list(fit$cluster),FUN=mean)
+# append cluster assignment
+clustering_fit <- data.frame(clustering, fit$cluster)
+table(fit$cluster)
+
+fit_3 <- kmeans(clustering[2:8], 3) # 3 cluster solution
+# get cluster means 
+aggregate(clustering[2:8],by=list(fit_3$cluster),FUN=mean)
+# append cluster assignment
+clustering_fit_3 <- data.frame(clustering, fit_3$cluster)
+table(fit_3$cluster)
+#i'm not sure if this is the right clustering method
+
+fit_10 <- kmeans(clustering[2:8], 10) # 10 cluster solution
+# get cluster means 
+aggregate(clustering[2:8],by=list(fit_10$cluster),FUN=mean)
+# append cluster assignment
+clustering_fit_10 <- data.frame(clustering, fit_10$cluster)
+table(fit_10$cluster)
+
+## Cluster Plot against 1st 2 principal components
+# vary parameters for most readable graph
+clusplot(clustering[2:8], fit_10$cluster, color=TRUE, shade=TRUE, 
+         labels=2, lines=0)
+
+# Centroid Plot against 1st 2 discriminant functions
+library(fpc)
+plotcluster(clustering[2:8], fit_10$cluster)
+
+#####clustering with scaled data
+# Determine number of clusters using between SS and within SS.
+# You want within SS to be small and between SS to be large, relatively
+wss_clust_std <- (nrow(clust_std)-1)*sum(apply(clust_std,2,var)) #this is the wss of the current set of observations by the 7 features (k=1)
+bss_clust_std <- sum(sapply(clust_std, function(x) (mean(clust_std)-x)^2))-wss_clust_std #this is 0 in this case because the data set consists of normal distributions
+write.csv(clust_std,"clust_std.csv",row.names = F)
+for (i in 2:15) wss_clust_std[i] <- sum(kmeans(clust_std, 
+                                     centers=i)$withinss)
+for (i in 2:15) bss_clust_std[i] <- sum(kmeans(clust_std, 
+                                               centers=i)$betweenss)
+#this is the wss of data points by # of clusters defined from 2-15
+
+#plot wss and bss on same axes
+plot(1:15, wss_clust_std, type="b", col="blue",xlab="Number of Clusters",
+     ylab="Within groups sum of squares")
+par(new = T) #for some reason, this keeps the first plot there and allows me to add another plot to it (below)
+plot(1:15, bss_clust_std,type="b",col="red",axes = F,ylab = "",xlab = "")
+axis(side = 4) #this moves the BSS axis to the right
+
+#try 10-cluster solution
+fit_clust_std_10 <- kmeans(clust_std, 10) # 10 cluster solution
+# get cluster means 
+aggregate(clustering[2:8],by=list(fit_clust_std_10$cluster),FUN=mean)
+# append cluster assignment
+clustering_std_fit_10 <- data.frame(clustering, fit_clust_std_10$cluster)
+table(fit_clust_std_10$cluster)
+
+## Cluster Plot against 1st 2 principal components
+# vary parameters for most readable graph
+clusplot(clustering_std_fit_10[2:9], fit_clust_std_10$cluster, color=TRUE, shade=TRUE, 
+         labels=2, lines=0)
+
+# Centroid Plot against 1st 2 discriminant functions
+library(fpc)
+plotcluster(clustering_std_fit_10[2:9], fit_clust_std_10$cluster)
+
+#####Clustering with logged data
+summary(clustering)
+#remove vLY_Pen, vLY_Sales,vLY_RC30--see how that works
+clust_log <- log(clustering[,c("YTD_Pen","Close_Rate","Pro_Pen","RC30_pct")])
+head(clust_log,20)
+cor(clust_log, method = "pearson",use = "complete.obs")
+summary(clust_log)
+plot(clustering$YTD_Pen,clustering$Close_Rate)
+plot(clust_log$YTD_Pen,clust_log$Close_Rate)
+####not sure why cor and the following code result in NaN
+#determine number of clusters
+wss_clust_log <- (nrow(clust_log)-1)*sum(apply(clust_log,2,var)) #this is the wss of the current set of observations by the 7 features (k=1)
+bss_clust_std <- sum(sapply(clust_std, function(x) (mean(clust_std)-x)^2))-wss_clust_std #this is 0 in this case because the data set consists of normal distributions
+write.csv(clust_std,"clust_std.csv",row.names = F)
+for (i in 2:15) wss_clust_std[i] <- sum(kmeans(clust_std, 
+                                               centers=i)$withinss)
+for (i in 2:15) bss_clust_std[i] <- sum(kmeans(clust_std, 
+                                               centers=i)$betweenss)
+
+
+### Try 1 feature
+single_feature <- clustering$Close_Rate
+single_feature <- as.data.frame(single_feature)
+#determine number of clusters
+wss_close_rate <- (nrow(single_feature)-1)*sum(apply(single_feature,2,var)) #this is the wss of the current set of observations by the 7 features (k=1)
+bss_close_rate <- sum(sapply(single_feature, function(x) (mean(single_feature$single_feature)-x)^2))-wss_close_rate #this is 0 in this case because the data set consists of normal distributions
+write.csv(clust_std,"clust_std.csv",row.names = F)
+for (i in 2:15) wss_close_rate[i] <- sum(kmeans(single_feature, 
+                                               centers=i)$withinss)
+for (i in 2:15) bss_close_rate[i] <- sum(kmeans(clust_std, 
+                                               centers=i)$betweenss)
+
+#plot wss and bss on same axes
+plot(1:15, wss_close_rate, type="b", col="blue",xlab="Number of Clusters",
+     ylab="Within groups sum of squares")
+par(new = T) #for some reason, this keeps the first plot there and allows me to add another plot to it (below)
+plot(1:15, bss_clust_std,type="b",col="red",axes = F,ylab = "",xlab = "")
+axis(side = 4) #this moves the BSS axis to the right
+
+#try 4-cluster solution
+fit_close_rate <- kmeans(single_feature, 4) # 4 cluster solution
+# get cluster means 
+aggregate(single_feature,by=list(fit_close_rate$cluster),FUN=mean)
+# append cluster assignment
+single_feature_append <- data.frame(single_feature, fit_close_rate$cluster)
+table(fit_close_rate$cluster)
+
+#bringing in IDs to map onto tableau
+single_feature_append_2 <- data.frame(clustering$ID,single_feature_append)
+write.csv(single_feature_append_2,file = "close_rate_cluster.csv",row.names = F)
+
+## Cluster Plot against 1st 2 principal components
+# vary parameters for most readable graph
+clusplot(single_feature_append, fit_close_rate$cluster, color=TRUE, shade=TRUE, 
+         labels=2, lines=0)
+
+# Centroid Plot against 1st 2 discriminant functions
+plotcluster(single_feature_append, fit_close_rate$cluster)
+
+#save global environment
+save(list=ls(all = TRUE),file="Clustering.RData")
